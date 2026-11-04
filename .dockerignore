@@ -1,0 +1,6 @@
+# Only nginx.conf and web/ go into the image.
+*
+!nginx.conf
+!web/
+# Your local tray/combos never end up in a published image.
+web/config.json
