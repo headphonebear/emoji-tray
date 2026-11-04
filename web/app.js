@@ -87,10 +87,16 @@ const state = {
   favorites: store.get("favorites", []),   // base emojis (item.e), newest first
   myCombos: store.get("combos", []),        // [{ emojis, label? }]
   composer: [],                             // emojis being assembled into a combo
+  showUnsupported: store.get("showUnsupported", false),
   config: { tray: null, combos: [] },
   items: [],                                // every emoji; index = data-i on its tile
   byKey: new Map(),                         // key(emoji) → item, incl. tone variants
 };
+
+/** Shown in the groups and in search? Emojis the system font can't draw are
+ *  hidden unless the visitor asked to see them anyway. (Tray, favourites and
+ *  combos always show what they contain — someone chose those on purpose.) */
+const visible = (item) => state.showUnsupported || !item.unsupported;
 
 /** The emoji to show/copy for an item, honouring the chosen skin tone. */
 function display(item) {
@@ -196,10 +202,11 @@ function renderGroups(data) {
   for (const g of data.groups) {
     const id = slug(g.name);
     const meta = GROUP_META[g.name] || { icon: "•", label: g.name };
-    nav.append(navLink(id, meta.icon, meta.label, g.items.length));
+    const items = g.items.filter(visible);
+    nav.append(navLink(id, meta.icon, meta.label, items.length));
     groups.append(el("section", { class: "group", id }, [
-      sectionTitle(g.name, g.items.length),
-      el("div", { class: "grid" }, g.items.map(tile)),
+      sectionTitle(g.name, items.length),
+      el("div", { class: "grid" }, items.map(tile)),
     ]));
   }
 }
@@ -386,6 +393,7 @@ function runSearch(query) {
   // keyword hit, so 🦉 "owl" ranks above things merely tagged "bird".
   const hits = [];
   for (const it of state.items) {
+    if (!visible(it)) continue;
     let score = 0;
     for (const w of words) {
       let best = 0;
@@ -427,6 +435,92 @@ function watchSections() {
     for (const [id, a] of links) a.setAttribute("aria-current", String(id === current));
   }, { rootMargin: "-80px 0px -60% 0px" });
   for (const s of $$(".group")) sectionObserver.observe(s);
+}
+
+/** Footer line explaining hidden emojis, with a switch to show them anyway. */
+function renderFontNote(unsupported) {
+  const note = $(".font-note");
+  if (!unsupported.length) { note.hidden = true; return; }
+  const versions = [...new Set(unsupported.map((it) => it.v))].sort((a, b) => parseFloat(a) - parseFloat(b));
+  const what = `${unsupported.length} emoji${unsupported.length === 1 ? "" : "s"} from Emoji ${versions.join(", ")}`;
+  const toggle = el("button", { type: "button", class: "link-button",
+    textContent: state.showUnsupported ? "hide them again" : "show them anyway" });
+  toggle.addEventListener("click", () => {
+    store.set("showUnsupported", !state.showUnsupported);
+    location.reload();
+  });
+  note.replaceChildren(
+    state.showUnsupported
+      ? `Showing ${what}, which your system's emoji font can't draw yet (they may appear as boxes) · `
+      : `${what} hidden — your system's emoji font can't draw them yet · `,
+    toggle,
+  );
+  note.hidden = false;
+}
+
+// ── Which emoji versions can this system draw? ────────────────────────────
+
+/** New emojis reach operating systems months after Unicode releases them.
+ *  Until then the browser draws a "tofu" box (Firefox: a box with the hex
+ *  code), which is useless to copy and wider than a tile.
+ *
+ *  Detection: draw a few test emojis per Emoji version on a hidden canvas,
+ *  newest version first. A real emoji glyph comes out in colour and about one
+ *  em wide; tofu is single-colour (we draw in black) and/or wider (a ZWJ
+ *  sequence the font doesn't know falls apart into two glyphs). The first
+ *  version that passes is the newest one supported; everything newer gets
+ *  hidden. Smileys are preferred as test candidates because they're yellow —
+ *  a grey emoji (⚫, 🕳️) would look like tofu to this test.
+ *
+ *  Returns a predicate item → boolean. If detection itself can't work (no
+ *  colour font at all, canvas blocked by privacy settings) it says "yes" to
+ *  everything rather than hiding emojis by mistake. */
+function emojiSupport(groups) {
+  try {
+    const size = 40;
+    const canvas = el("canvas", { width: size, height: size });
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const fontStack = getComputedStyle(document.documentElement).getPropertyValue("--font-emoji");
+    ctx.font = `32px ${fontStack}`;
+    ctx.textBaseline = "top";
+    const refWidth = ctx.measureText("😀").width || 32;
+
+    const drawable = (emoji) => {
+      if (ctx.measureText(emoji).width > refWidth * 1.5) return false;
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = "#000";
+      ctx.fillText(emoji, 0, 0);
+      const px = ctx.getImageData(0, 0, size, size).data;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 64) continue;
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+        if (Math.abs(r - g) > 24 || Math.abs(g - b) > 24 || Math.abs(r - b) > 24) return true;
+      }
+      return false;
+    };
+
+    if (!drawable("😀")) return () => true; // no colour emoji font → can't judge
+
+    const byVersion = new Map();
+    for (const g of groups) {
+      for (const it of g.items) {
+        if (!byVersion.has(it.v)) byVersion.set(it.v, []);
+        // Smileys first (see above), everything else after.
+        byVersion.get(it.v)[g.name === "Smileys & Emotion" ? "unshift" : "push"](it);
+      }
+    }
+    const versions = [...byVersion.keys()].sort((a, b) => parseFloat(b) - parseFloat(a));
+    let newest = null;
+    for (const v of versions) {
+      // Everything before Emoji 12 (2019) is everywhere by now — stop testing.
+      if (parseFloat(v) < 12 || byVersion.get(v).slice(0, 4).some((it) => drawable(it.e))) { newest = v; break; }
+    }
+    if (newest === null) return () => true;
+    const limit = parseFloat(newest);
+    return (item) => parseFloat(item.v) <= limit;
+  } catch {
+    return () => true;
+  }
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
@@ -483,11 +577,18 @@ async function main() {
       for (const v of it.t || []) if (!state.byKey.has(key(v))) state.byKey.set(key(v), it);
     }
   }
+  // Font check needs the fonts to be ready, or everything looks like tofu.
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const supported = emojiSupport(data.groups);
+  const unsupported = state.items.filter((it) => !supported(it));
+  for (const it of unsupported) it.unsupported = true;
+
   renderGroups(data);
   renderPersonal();
   $(".loading").remove();
   $(".data-version").textContent =
     `Emoji ${data.emoji} · CLDR ${data.cldr} · ${state.items.length} emojis · search in ${data.langs.join(", ")}`;
+  renderFontNote(unsupported);
 
   document.addEventListener("click", (ev) => {
     const pop = $(".popover");
