@@ -1,0 +1,6 @@
+# Raw downloads from unicode.org / cldr-json (re-fetched by tools/build_data.py)
+tools/.cache/
+__pycache__/
+*.pyc
+# Local site config (your own tray/combos) — only the example is committed
+web/config.json
