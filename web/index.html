@@ -37,8 +37,10 @@
   </header>
 
   <div class="layout" id="top">
-    <nav class="sidenav" aria-label="Emoji groups">
-      <!-- filled by app.js -->
+    <nav class="sidenav" aria-label="Sections">
+      <!-- filled by app.js: tray / combos / favorites, then the Unicode groups -->
+      <div class="sidenav-personal"></div>
+      <div class="sidenav-groups"></div>
     </nav>
 
     <main class="content">
@@ -49,12 +51,19 @@
         <div class="grid"></div>
       </section>
 
-      <div class="groups"><!-- filled by app.js --></div>
+      <div class="personal"><!-- tray, combos, favorites — filled by app.js --></div>
+      <div class="groups"><!-- one section per Unicode group — filled by app.js --></div>
 
       <footer class="footer">
         <p>
-          Click an emoji to copy it · right-click for other skin tones ·
-          <span class="data-version"></span>
+          Click to copy · shift+click to build a combo · right-click for skin tones and ☆ ·
+          <kbd>/</kbd> search · <span class="data-version"></span>
+        </p>
+        <p class="footer-actions">
+          Your favorites and combos live in this browser only:
+          <button type="button" class="link-button export-mine">export</button> ·
+          <button type="button" class="link-button import-mine">import</button>
+          <input type="file" class="import-file" accept="application/json,.json" hidden>
         </p>
         <p>
           No tracking, no ads, no third-party anything. Emoji data © Unicode, Inc.
@@ -67,8 +76,15 @@
 
   <div class="toast" role="status" aria-live="polite" hidden></div>
 
-  <div class="popover" role="dialog" aria-label="Pick a skin tone" hidden>
-    <div class="popover-grid"></div>
+  <!-- Combo composer: appears when you shift+click emojis. -->
+  <div class="composer" role="region" aria-label="Combo being built" hidden>
+    <span class="composer-emojis"></span>
+    <button type="button" class="composer-copy">Copy</button>
+    <button type="button" class="composer-save">Save combo</button>
+    <button type="button" class="composer-undo" title="Remove the last emoji">⌫</button>
+    <button type="button" class="composer-clear" title="Discard">×</button>
   </div>
+
+  <div class="popover" role="dialog" aria-label="Emoji options" hidden></div>
 </body>
 </html>
